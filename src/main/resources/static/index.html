@@ -11,6 +11,7 @@
   .badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff}
   .L1{background:#16a34a}.L2{background:#d97706}.L3{background:#dc2626}
   label{display:block;margin:8px 0;cursor:pointer}
+  input[type=text]{padding:10px;font-size:16px;border:1px solid #d1d5db;border-radius:8px;width:260px}
   button{background:#4f46e5;color:#fff;border:0;padding:10px 20px;border-radius:8px;font-size:16px;cursor:pointer}
   .bar{height:12px;border-radius:6px;background:#e5e7eb;overflow:hidden;margin-bottom:12px}
   .fill{height:100%}
@@ -18,6 +19,8 @@
   .ok{color:#16a34a;font-weight:600}.bad{color:#dc2626;font-weight:600}
   .progress{height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin:8px 0}
   .progress div{height:100%;background:#4f46e5}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #e5e7eb;font-size:14px}
 </style>
 </head>
 <body>
@@ -26,11 +29,23 @@
 <div id="app"></div>
 <script>
 const NAMES = {1: 'Easy', 2: 'Medium', 3: 'Hard'};
+let studentName = '';
 let answers = [];
 let levels = [];
 let current = null;
 
-function start() {
+function home() {
+  document.getElementById('app').innerHTML =
+    '<div class="card"><h2>Start a quiz</h2>' +
+    '<p>Enter your name so we can track your progress:</p>' +
+    '<input type="text" id="nameBox" placeholder="Your name" value="' + studentName + '"> ' +
+    '<button onclick="begin()">Start</button></div>';
+}
+
+function begin() {
+  const v = document.getElementById('nameBox').value.trim();
+  if (!v) { alert('Please enter your name'); return; }
+  studentName = v;
   answers = [];
   levels = [];
   current = null;
@@ -41,7 +56,7 @@ async function next() {
   const res = await fetch('/api/quiz/next', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers })
+    body: JSON.stringify({ answers: answers, studentName: studentName })
   });
   const d = await res.json();
   if (d.finished) { finish(); return; }
@@ -80,11 +95,14 @@ async function finish() {
   const res = await fetch('/api/quiz/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers })
+    body: JSON.stringify({ answers: answers, studentName: studentName })
   });
   const r = await res.json();
 
-  let html = '<div class="card"><h2>Score: ' + r.score + ' / ' + r.total + '</h2>';
+  const hres = await fetch('/api/quiz/history?name=' + encodeURIComponent(studentName));
+  const history = await hres.json();
+
+  let html = '<div class="card"><h2>' + studentName + ', your score: ' + r.score + ' / ' + r.total + '</h2>';
   html += '<p><b>Difficulty journey:</b> ' + levels.map(l => NAMES[l]).join(' &rarr; ') + '</p>';
   r.topics.forEach(t => {
     const color = t.status === 'STRONG' ? '#16a34a' : t.status === 'DEVELOPING' ? '#d97706' : '#dc2626';
@@ -96,11 +114,36 @@ async function finish() {
   r.learningPath.forEach(s => {
     html += '<p><b>Step ' + s.step + ':</b> ' + s.lesson + ' <i>(' + s.topic + ', ' + s.minutes + ' min)</i></p>';
   });
-  html += '<button onclick="start()">Retake quiz</button></div>';
+  html += '</div>';
+
+  html += '<div class="card"><h2>Your progress</h2>';
+  if (history.length > 1) {
+    const first = history[0];
+    const last = history[history.length - 1];
+    const diff = last.score - first.score;
+    const msg = diff > 0 ? 'You improved by ' + diff + ' points since your first attempt!'
+              : diff < 0 ? 'Your score is ' + (-diff) + ' points lower than your first attempt. Review the learning path and try again.'
+              : 'Same score as your first attempt.';
+    html += '<p><b>' + msg + '</b></p>';
+  }
+  html += '<table><tr><th>Attempt</th><th>Date</th><th>Score</th><th>Topics</th></tr>';
+  history.forEach((a, i) => {
+    const date = String(a.taken_at).replace('T', ' ').substring(0, 16);
+    const tp = a.topics.map(t => t.topic + ' ' + t.percent + '%').join(', ');
+    html += '<tr><td>' + (i + 1) + '</td><td>' + date + '</td><td>' + a.score + '/' + a.total + '</td><td>' + tp + '</td></tr>';
+  });
+  html += '</table><br><button onclick="begin2()">Retake quiz</button></div>';
   document.getElementById('app').innerHTML = html;
 }
 
-start();
+function begin2() {
+  answers = [];
+  levels = [];
+  current = null;
+  next();
+}
+
+home();
 </script>
 </body>
 </html>

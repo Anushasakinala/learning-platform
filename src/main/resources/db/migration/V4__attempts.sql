@@ -1,0 +1,18 @@
+CREATE TABLE attempts (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  student_name VARCHAR(100) NOT NULL,
+  score INT NOT NULL,
+  total INT NOT NULL,
+  taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE attempt_topics (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  attempt_id BIGINT NOT NULL,
+  topic_name VARCHAR(100) NOT NULL,
+  correct INT NOT NULL,
+  total INT NOT NULL,
+  percent INT NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  FOREIGN KEY (attempt_id) REFERENCES attempts(id)
+);

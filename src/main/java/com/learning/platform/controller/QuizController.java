@@ -1,7 +1,11 @@
 package com.learning.platform.controller;
 
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -17,7 +21,7 @@ public class QuizController {
     }
 
     public record Answer(Long questionId, String choice) {}
-    public record Submission(List<Answer> answers) {}
+    public record Submission(List<Answer> answers, String studentName) {}
 
     @PostMapping("/next")
     public Map<String, Object> next(@RequestBody Submission sub) {
@@ -82,6 +86,9 @@ public class QuizController {
 
     @PostMapping("/submit")
     public Map<String, Object> submit(@RequestBody Submission sub) {
+        String name = (sub.studentName() == null || sub.studentName().isBlank())
+                ? "Guest" : sub.studentName().trim();
+
         Map<Long, Map<String, Object>> key = new HashMap<>();
         for (Map<String, Object> r : jdbc.queryForList(
                 "SELECT q.id, t.id AS tid, t.name AS tname, q.correct " +
@@ -108,6 +115,20 @@ public class QuizController {
             }
         }
 
+        final int finalScore = score;
+        final int finalTotal = total;
+        KeyHolder holder = new GeneratedKeyHolder();
+        jdbc.update(con -> {
+            PreparedStatement ps = con.prepareStatement(
+                "INSERT INTO attempts (student_name, score, total) VALUES (?, ?, ?)",
+                Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, name);
+            ps.setInt(2, finalScore);
+            ps.setInt(3, finalTotal);
+            return ps;
+        }, holder);
+        long attemptId = holder.getKey().longValue();
+
         List<Map<String, Object>> topics = new ArrayList<>();
         List<Map<String, Object>> path = new ArrayList<>();
         int step = 1;
@@ -124,6 +145,10 @@ public class QuizController {
             t.put("percent", percent);
             t.put("status", status);
             topics.add(t);
+
+            jdbc.update(
+                "INSERT INTO attempt_topics (attempt_id, topic_name, correct, total, percent, status) VALUES (?, ?, ?, ?, ?, ?)",
+                attemptId, names.get(e.getKey()), s[0], s[1], percent, status);
 
             if (!status.equals("STRONG")) {
                 int limit = status.equals("WEAK") ? 10 : 1;
@@ -147,5 +172,18 @@ public class QuizController {
         result.put("topics", topics);
         result.put("learningPath", path);
         return result;
+    }
+
+    @GetMapping("/history")
+    public List<Map<String, Object>> history(@RequestParam String name) {
+        List<Map<String, Object>> attempts = jdbc.queryForList(
+            "SELECT id, score, total, taken_at FROM attempts WHERE student_name = ? ORDER BY id",
+            name.trim());
+        for (Map<String, Object> a : attempts) {
+            a.put("topics", jdbc.queryForList(
+                "SELECT topic_name AS topic, percent, status FROM attempt_topics WHERE attempt_id = ? ORDER BY id",
+                a.get("id")));
+        }
+        return attempts;
     }
 }
