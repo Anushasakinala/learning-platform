@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personalized Learning Platform</title>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;max-width:760px;margin:30px auto;padding:0 16px;background:#f5f7fb;color:#1f2937}
+  .card{background:#fff;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  .topic{font-size:12px;color:#6366f1;font-weight:600;text-transform:uppercase}
+  label{display:block;margin:6px 0;cursor:pointer}
+  button{background:#4f46e5;color:#fff;border:0;padding:10px 20px;border-radius:8px;font-size:16px;cursor:pointer}
+  .bar{height:12px;border-radius:6px;background:#e5e7eb;overflow:hidden;margin-bottom:12px}
+  .fill{height:100%}
+  .WEAK{color:#dc2626}.DEVELOPING{color:#d97706}.STRONG{color:#16a34a}
+</style>
+</head>
+<body>
+<h1>Personalized Learning Platform</h1>
+<p>Take the quiz, find your weak topics, and get a personalised learning path.</p>
+<div id="quiz"></div>
+<button id="submitBtn" style="display:none" onclick="submitQuiz()">Submit quiz</button>
+<div id="result"></div>
+<script>
+let questions = [];
+
+async function load() {
+  const res = await fetch('/api/quiz');
+  questions = await res.json();
+  const box = document.getElementById('quiz');
+  box.innerHTML = '';
+  questions.forEach((q, i) => {
+    const opts = ['a','b','c','d'].map(k =>
+      `<label><input type="radio" name="q${q.id}" value="${k.toUpperCase()}"> ${q[k]}</label>`).join('');
+    box.innerHTML += `<div class="card"><div class="topic">${q.topic}</div><b>${i + 1}. ${q.text}</b>${opts}</div>`;
+  });
+  document.getElementById('submitBtn').style.display = 'inline-block';
+}
+
+async function submitQuiz() {
+  const answers = questions.map(q => {
+    const c = document.querySelector(`input[name="q${q.id}"]:checked`);
+    return { questionId: q.id, choice: c ? c.value : null };
+  });
+  const res = await fetch('/api/quiz/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers })
+  });
+  const r = await res.json();
+
+  let html = `<div class="card"><h2>Score: ${r.score} / ${r.total}</h2>`;
+  r.topics.forEach(t => {
+    const color = t.status === 'STRONG' ? '#16a34a' : t.status === 'DEVELOPING' ? '#d97706' : '#dc2626';
+    html += `<p><b>${t.topic}</b> - <span class="${t.status}">${t.status}</span> (${t.correct}/${t.total})</p>` +
+            `<div class="bar"><div class="fill" style="width:${t.percent}%;background:${color}"></div></div>`;
+  });
+  html += '</div><div class="card"><h2>Your learning path</h2>';
+  if (r.learningPath.length === 0) html += '<p>Great job! No weak topics found.</p>';
+  r.learningPath.forEach(s => {
+    html += `<p><b>Step ${s.step}:</b> ${s.lesson} <i>(${s.topic}, ${s.minutes} min)</i></p>`;
+  });
+  html += '<button onclick="location.reload()">Retake quiz</button></div>';
+  document.getElementById('result').innerHTML = html;
+  document.getElementById('submitBtn').style.display = 'none';
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+load();
+</script>
+</body>
+</html>
