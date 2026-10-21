@@ -8,6 +8,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/quiz")
 public class QuizController {
 
+    private static final int TOTAL_QUESTIONS = 10;
+
     private final JdbcTemplate jdbc;
 
     public QuizController(JdbcTemplate jdbc) {
@@ -17,12 +19,65 @@ public class QuizController {
     public record Answer(Long questionId, String choice) {}
     public record Submission(List<Answer> answers) {}
 
-    @GetMapping
-    public List<Map<String, Object>> quiz() {
-        return jdbc.queryForList(
-            "SELECT q.id, t.name AS topic, q.question_text AS text, " +
-            "q.option_a AS a, q.option_b AS b, q.option_c AS c, q.option_d AS d " +
-            "FROM questions q JOIN topics t ON t.id = q.topic_id ORDER BY RAND()");
+    @PostMapping("/next")
+    public Map<String, Object> next(@RequestBody Submission sub) {
+        List<Answer> answers = sub.answers() == null ? new ArrayList<>() : sub.answers();
+
+        Map<Long, Map<String, Object>> byId = new HashMap<>();
+        for (Map<String, Object> r : jdbc.queryForList(
+                "SELECT q.id, t.name AS topic, q.question_text AS text, " +
+                "q.option_a AS a, q.option_b AS b, q.option_c AS c, q.option_d AS d, " +
+                "q.correct, q.difficulty FROM questions q JOIN topics t ON t.id = q.topic_id")) {
+            byId.put(((Number) r.get("id")).longValue(), r);
+        }
+
+        int level = 2;
+        Boolean lastCorrect = null;
+        Set<Long> done = new HashSet<>();
+
+        for (Answer a : answers) {
+            Map<String, Object> q = byId.get(a.questionId());
+            if (q == null) continue;
+            done.add(a.questionId());
+            boolean ok = a.choice() != null && a.choice().equalsIgnoreCase((String) q.get("correct"));
+            lastCorrect = ok;
+            level = ok ? Math.min(3, level + 1) : Math.max(1, level - 1);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("lastCorrect", lastCorrect);
+
+        List<Map<String, Object>> candidates = new ArrayList<>();
+        for (Map.Entry<Long, Map<String, Object>> e : byId.entrySet()) {
+            if (!done.contains(e.getKey())) candidates.add(e.getValue());
+        }
+
+        if (done.size() >= TOTAL_QUESTIONS || candidates.isEmpty()) {
+            result.put("finished", true);
+            return result;
+        }
+
+        final int target = level;
+        Collections.shuffle(candidates);
+        candidates.sort(Comparator.comparingInt(
+                (Map<String, Object> m) -> Math.abs(((Number) m.get("difficulty")).intValue() - target)));
+        Map<String, Object> chosen = candidates.get(0);
+
+        Map<String, Object> question = new LinkedHashMap<>();
+        question.put("id", chosen.get("id"));
+        question.put("topic", chosen.get("topic"));
+        question.put("text", chosen.get("text"));
+        question.put("a", chosen.get("a"));
+        question.put("b", chosen.get("b"));
+        question.put("c", chosen.get("c"));
+        question.put("d", chosen.get("d"));
+
+        result.put("finished", false);
+        result.put("number", done.size() + 1);
+        result.put("total", TOTAL_QUESTIONS);
+        result.put("level", level);
+        result.put("question", question);
+        return result;
     }
 
     @PostMapping("/submit")
