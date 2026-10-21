@@ -143,6 +143,26 @@ function begin2() {
   next();
 }
 
+const originalShow = show;
+show = function (d) {
+  originalShow(d);
+  if (d.lastCorrect === false && answers.length > 0) {
+    const last = answers[answers.length - 1];
+    const box = document.createElement('div');
+    box.className = 'card';
+    box.innerHTML = '<b>AI tutor:</b> <i>thinking...</i>';
+    const app = document.getElementById('app');
+    app.insertBefore(box, app.firstChild.nextSibling);
+    fetch('/api/quiz/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId: last.questionId, choice: last.choice })
+    }).then(r => r.json()).then(e => {
+      box.innerHTML = '<b>AI tutor:</b> ' + e.explanation;
+    }).catch(() => { box.innerHTML = '<b>AI tutor:</b> unavailable right now.'; });
+  }
+};
+
 home();
 </script>
 </body>
