@@ -10,9 +10,6 @@ import org.springframework.web.client.RestClient;
 @RequestMapping("/api/quiz")
 public class ExplainController {
 
-    private static final String API_URL = "https://api.anthropic.com/v1/messages";
-    private static final String MODEL = "claude-sonnet-5-5";
-
     private final JdbcTemplate jdbc;
     private final RestClient http = RestClient.create();
 
@@ -43,17 +40,21 @@ public class ExplainController {
         String chosen = req.choice() == null ? "-" : req.choice();
         String correctText = optionText(q, correct);
         String chosenText = optionText(q, chosen);
+        String fallback = "The correct answer is " + correct + ") " + correctText + ".";
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("correctLetter", correct);
         out.put("correctText", correctText);
 
-        String key = System.getenv("ANTHROPIC_API_KEY");
-        if (key == null || key.isBlank()) {
-            out.put("explanation", "The correct answer is " + correct + ") " + correctText +
-                    ". (AI tutor is not configured. Set ANTHROPIC_API_KEY to enable explanations.)");
+        String key = System.getenv("GEMINI_API_KEY");
+        key = key == null ? "" : key.trim();
+        if (key.isEmpty()) {
+            out.put("explanation", fallback);
             return out;
         }
+
+        String model = System.getenv("GEMINI_MODEL");
+        if (model == null || model.isBlank()) model = "gemini-3.5-flash";
 
         String prompt = "You are a friendly Java tutor. A student answered a quiz question wrongly. " +
             "In at most 3 short sentences, explain why the correct answer is right and why the student's " +
@@ -63,27 +64,25 @@ public class ExplainController {
             "Student chose " + chosen + ": " + chosenText + "\n" +
             "Correct answer " + correct + ": " + correctText;
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", MODEL);
-        payload.put("max_tokens", 300);
-        payload.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+        Map<String, Object> payload = Map.of("contents",
+            List.of(Map.of("parts", List.of(Map.of("text", prompt)))));
 
         try {
             Map<?, ?> body = http.post()
-                .uri(API_URL)
-                .header("x-api-key", key)
-                .header("anthropic-version", "2023-06-01")
+                .uri("https://generativelanguage.googleapis.com/v1beta/models/" + model.trim() + ":generateContent")
+                .header("x-goog-api-key", key)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(payload)
                 .retrieve()
                 .body(Map.class);
 
-            List<?> content = (List<?>) body.get("content");
-            Map<?, ?> first = (Map<?, ?>) content.get(0);
-            out.put("explanation", String.valueOf(first.get("text")));
+            List<?> candidates = (List<?>) body.get("candidates");
+            Map<?, ?> content = (Map<?, ?>) ((Map<?, ?>) candidates.get(0)).get("content");
+            List<?> parts = (List<?>) content.get("parts");
+            out.put("explanation", String.valueOf(((Map<?, ?>) parts.get(0)).get("text")).trim());
         } catch (Exception e) {
-            out.put("explanation", "The correct answer is " + correct + ") " + correctText +
-                    ". (AI explanation unavailable right now.)");
+            System.err.println("AI error: " + e);
+            out.put("explanation", fallback);
         }
         return out;
     }
